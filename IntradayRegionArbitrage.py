@@ -29,6 +29,14 @@ class IntradayRegionArbitrage:
         self.cpt: list = []  # current position tickers
 
     def data_feed(self, timestamp: time, return_data: list, price_data: list, tickers: list):
+        """
+        :param timestamp: current time as datetime.time object
+        :param return_data: list of return normalized to the base symbol
+        :param price_data: list of price data including the base symbol on index 0
+        :param tickers: list of tickers excluding the base symbol
+        :return: void
+        """
+
         assert len(tickers) == len(return_data), "Tickers and Data length dont match"
         assert len(tickers) == len(price_data[1:]), "Tickers and Price length dont match"
         self._tickers = tickers
@@ -43,7 +51,6 @@ class IntradayRegionArbitrage:
                 [self.close_trade(i) for i in self.cpt if len(self.cpt) > 0]
                 print(f'{" Market-Closing ":#^100}')
 
-
         elif (not self.in_trade) and (not is_closing):
             opportunity, signal = self.check_opportunity(return_data)
             self.cpt = np.where(opportunity)[0].tolist()
@@ -52,6 +59,13 @@ class IntradayRegionArbitrage:
                 self.trade_signal(signal)
 
     def check_opportunity(self, return_data: list) -> (list, list):
+        """
+        :param return_data: list of returns, normalized to the base symbol
+        :return: opportunity: list of boolean, signal: list of boolean
+
+        opportunity: weather the current data allows trade => threshold met
+        signal: if the trade is short:False / long:True
+        """
         opportunity, signal = [], []
         for dp in return_data:
             opportunity.append(dp > self.min_deviation)
@@ -59,6 +73,13 @@ class IntradayRegionArbitrage:
         return opportunity, signal
 
     def trade_signal(self, signal: list):
+        """
+        :param signal: list of boolean, signals to be traded -> long/short
+        :return:
+
+        executes trades according to the signal
+        """
+
         print(f"\t--Opening Trade")
         order_size = (self.trade_size * self.balance if self.trade_size_percent else self.trade_size) / len(self.cpt) * 2
         for i in self.cpt:
@@ -69,6 +90,14 @@ class IntradayRegionArbitrage:
         self.in_trade = True
 
     def price_check(self, return_data: list):
+        """
+        :param return_data: list of returns, normalized to the base symbol
+        :return: void
+
+        checks whether current return meets take profit requirement
+        checks whether current price meets stop loss requirements
+        """
+
         for i in self.cpt:
             # trigger take profit
             if (return_data[i] <= self.trigger_range) and (return_data[i] >= -self.trigger_range):
@@ -82,8 +111,14 @@ class IntradayRegionArbitrage:
                 print("\tstop loss")
                 self.close_trade(i, self._tickers[i])
 
-
     def close_trade(self, i: int):
+        """
+        :param i: index of trade to be closed
+        :return: void
+
+        closing a trade and printing PNL
+        """
+
         ticker: str = self._tickers[i]
         tmp_bal = self.balance
 
@@ -102,5 +137,11 @@ class IntradayRegionArbitrage:
         if len(self.cpt) < 1:
             self.in_trade = False
 
-    def is_closing(self, timestamp: time) -> bool:
+    def is_closing(self, timestamp: time) -> bool: 
+        """
+        :param timestamp: current time in datetime.time object
+        :return: void
+
+        checks whether market is closing: 16:30:00
+        """
         return timestamp > time(16, 29, 0)
