@@ -11,22 +11,26 @@ class IntradayRegionArbitrage:
         assert min_deviation > trigger_range > 0, "trigger range must be greater tah 0 and smaller than min_deviation"
         assert (trade_size < 1 if trade_size_percent else True), "Trade size must be smaller than 1, if it is a percentage!"
 
-        self.balance = bal  # balance of portfolio
-        self.min_deviation = min_deviation  # min deviation for arbitrage to trigger
-        self.sl_percent = sl_percent  # stop-loss size
-        self.trigger_range = trigger_range  # range of trade exit -> positive value only
 
-        self.trade_size_percent = trade_size_percent
-        self.trade_size = trade_size
+        """ Trading Params """
+        self.min_deviation: float = min_deviation  # min deviation for arbitrage to trigger
+        self.sl_percent: float = sl_percent  # stop-loss size
+        self.trigger_range: float = trigger_range  # range of trade exit -> positive value only
+        self.trade_size_percent: bool = trade_size_percent # if trade size is a percentage
+        self.trade_size: float = trade_size
 
-        self.in_trade: bool = False
+        """ Stored Values """
+        self.balance: float = bal  # balance of portfolio
+        self.tickers: list = []
+        self.base_ticker: str = ""
+        self.trades = []  # returns of individual trades
         self.shares: dict = {}  # shares of the arbitrage tickers
         self.base_shares: dict = {}  # shares of the base ticker by arbitrage ticker
 
-        self._tickers: list = []
+        """ Internal Only/ Temporary Data """
         self._price_data: list = []
         self._base_share_price: float = 0
-        self.cpt: list = []  # current position tickers
+        self._cpt: list = []  # current position tickers
 
     def data_feed(self, timestamp: time, return_data: list, price_data: list, tickers: list):
         """
@@ -37,25 +41,27 @@ class IntradayRegionArbitrage:
         :return: void
         """
 
-        assert len(tickers) == len(return_data), "Tickers and Data length dont match"
-        assert len(tickers) == len(price_data[1:]), "Tickers and Price length dont match"
-        self._tickers = tickers
+        assert len(tickers[1:]) == len(return_data), "Tickers and Data length dont match"
+        assert len(tickers) == len(price_data), "Tickers and Price length dont match"
+
+        self.base_ticker, self.tickers = tickers[0], tickers[1:]
         self._base_share_price = price_data[0]
         self._price_data = price_data[1:]
 
         is_closing = self.is_closing(timestamp)
-        if self.in_trade:
+        in_trade = len(self._cpt) > 0
+        if in_trade:
             self.price_check(return_data)
-            if is_closing and len(self.cpt) > 0:
+            if is_closing:
                 print(f'\tMarket-Closing --> close Trades')
-                [self.close_trade(i) for i in self.cpt if len(self.cpt) > 0]
+                tmp = self._cpt
+                _ = [self.close_trade(i) for i in tmp]
                 print(f'{" Market-Closing ":#^100}')
 
-        elif (not self.in_trade) and (not is_closing):
+        elif (not in_trade) and (not is_closing):
             opportunity, signal = self.check_opportunity(return_data)
-            self.cpt = np.where(opportunity)[0].tolist()
-
-            if len(self.cpt) > 0:
+            self._cpt = np.where(opportunity)[0].tolist()
+            if len(self._cpt) > 0:
                 self.trade_signal(signal)
 
     def check_opportunity(self, return_data: list) -> (list, list):
@@ -67,9 +73,9 @@ class IntradayRegionArbitrage:
         signal: if the trade is short:False / long:True
         """
         opportunity, signal = [], []
-        for dp in return_data:
-            opportunity.append(dp > self.min_deviation)
-            signal.append(dp > 0)
+        for data_point in return_data:
+            opportunity.append(data_point > self.min_deviation)
+            signal.append(data_point > 0)
         return opportunity, signal
 
     def trade_signal(self, signal: list):
@@ -81,13 +87,19 @@ class IntradayRegionArbitrage:
         """
 
         print(f"\t--Opening Trade")
-        order_size = (self.trade_size * self.balance if self.trade_size_percent else self.trade_size) / len(self.cpt) * 2
-        for i in self.cpt:
-            self.shares[self._tickers[i]] = order_size / self._price_data[i] * (1 if signal[i] else -1)
-            self.base_shares[self._tickers[i]] = order_size / self._base_share_price * (-1 if signal[i] else 1)
-            print(f"\t\tBaseShare-> amt: {self.base_shares[self._tickers[i]]} @{self._base_share_price} --> total: {self.base_shares[self._tickers[i]] * self._base_share_price}")
-            print(f"\t\tTicker {self._tickers[i]}-> amt: {self.shares[self._tickers[i]]} @{self._price_data[i]} --> total: {self.shares[self._tickers[i]] * self._price_data[i]}")
-        self.in_trade = True
+        order_size = (self.trade_size * self.balance if self.trade_size_percent else self.trade_size) / len(self._cpt) * 2
+        for idx in self._cpt:
+            ticker = self.tickers[idx]
+            price = self._price_data[idx]
+
+            self.shares[ticker] = order_size / price * (1 if signal[idx] else -1)
+            self.base_shares[ticker] = order_size / self._base_share_price * (-1 if signal[idx] else 1)
+
+            self.balance += self.shares[ticker] * price
+            self.balance += self.base_shares[ticker] * self._base_share_price
+
+            print(f"\t\tBaseShare {self.base_ticker}-> amt: {self.base_shares[ticker]:.4f} @{self._base_share_price:.4f} --> total: {self.base_shares[ticker] * self._base_share_price:.4f}")
+            print(f"\t\tTicker {ticker}-> amt: {self.shares[ticker]:.4f} @{price:.4f} --> total: {self.shares[ticker] * price:.4f}")
 
     def price_check(self, return_data: list):
         """
@@ -97,8 +109,7 @@ class IntradayRegionArbitrage:
         checks whether current return meets take profit requirement
         checks whether current price meets stop loss requirements
         """
-
-        for i in self.cpt:
+        for i in self._cpt:
             # trigger take profit
             if (return_data[i] <= self.trigger_range) and (return_data[i] >= -self.trigger_range):
                 print("\ttake profit")
@@ -106,38 +117,37 @@ class IntradayRegionArbitrage:
                 break
 
             # trigger stop-loss
-            pnl = self.shares[self._tickers[i]] * self._price_data[i] + self.base_shares[self._tickers[i]] * self._price_data[0]
-            if pnl < (self.trade_size / len(self._tickers) * self.sl_percent * -1):
+            pnl = self.shares[self.tickers[i]] * self._price_data[i] + self.base_shares[self.tickers[i]] * self._price_data[0]
+            if pnl < (self.trade_size / len(self.tickers) * self.sl_percent * -1):
                 print("\tstop loss")
-                self.close_trade(i, self._tickers[i])
+                self.close_trade(i)
 
-    def close_trade(self, i: int):
+    def close_trade(self, idx: int):
         """
-        :param i: index of trade to be closed
+        :param idx: index of trade to be closed
         :return: void
 
         closing a trade and printing PNL
         """
+        ticker: str = self.tickers[idx]
+        tmp_bal: float = self.balance
 
-        ticker: str = self._tickers[i]
-        tmp_bal = self.balance
+        self.balance += (self.base_shares[ticker] * self._base_share_price * -1) + (self.shares[ticker] * self._price_data[idx] * -1)
 
-        self.balance += self.base_shares[ticker] * self._base_share_price * -1
-        self.balance += self.shares[ticker] * self._price_data[i] * -1
+        roi: float = self.balance / tmp_bal - 1
 
         print(f"\t--Closing Trade")
-        print(f"\t\tBaseShare-> amt: {-self.base_shares[ticker]} @{self._base_share_price} --> total: {-self.base_shares[ticker] * self._base_share_price}")
-        print(f"\t\tTicker {ticker}-> amt: {-self.shares[ticker]} @{self._price_data[i]} --> total: {-self.shares[ticker] * self._price_data[i]}")
-        print(f"\t PNL: {self.balance/tmp_bal-1:.4%}")
+        print(f"\t\tBaseShare {self.base_ticker}-> amt: {-self.base_shares[ticker]:.4f} @{self._base_share_price:.4f} --> total: {-self.base_shares[ticker] * self._base_share_price:.4f}")
+        print(f"\t\tTicker {ticker}-> amt: {-self.shares[ticker]:.4f} @{self._price_data[idx]:.4f} --> total: {-self.shares[ticker] * self._price_data[idx]:.4f}")
+        print(f"\t PNL: {roi:.4%}")
 
         del self.shares[ticker]
         del self.base_shares[ticker]
 
-        self.cpt.remove(i)
-        if len(self.cpt) < 1:
-            self.in_trade = False
+        self.trades.append(roi)
+        self._cpt.remove(idx)
 
-    def is_closing(self, timestamp: time) -> bool: 
+    def is_closing(self, timestamp: time) -> bool:
         """
         :param timestamp: current time in datetime.time object
         :return: void
