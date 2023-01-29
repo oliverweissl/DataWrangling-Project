@@ -55,7 +55,7 @@ class IntradayRegionArbitrage:
             if is_closing:
                 print(f'\tMarket-Closing --> close Trades')
                 tmp = self._cpt
-                _ = [self.close_trade(i) for i in tmp]
+                _ = [self.close_trade(i, "mc") for i in tmp]
                 print(f'{" Market-Closing ":#^100}')
 
         elif (not in_trade) and (not is_closing):
@@ -113,7 +113,7 @@ class IntradayRegionArbitrage:
             # trigger take profit
             if (return_data[i] <= self.trigger_range) and (return_data[i] >= -self.trigger_range):
                 print("\ttake profit")
-                self.close_trade(i)
+                self.close_trade(i, "tp")
                 break
 
             # trigger stop-loss
@@ -121,11 +121,12 @@ class IntradayRegionArbitrage:
             pnl = (self.balance + (self.base_shares[ticker] * self._base_share_price * -1) + (self.shares[ticker] * self._price_data[i] * -1))/self.balance - 1
             if pnl < (self.sl_percent * -1):
                 print("\tstop loss")
-                self.close_trade(i)
+                self.close_trade(i, "sl")
 
-    def close_trade(self, idx: int):
+    def close_trade(self, idx: int, type:str):
         """
         :param idx: index of trade to be closed
+        :param type: why this trade was closed -> take profit/ stop loss / market closing
         :return: void
 
         closing a trade and printing PNL
@@ -145,7 +146,7 @@ class IntradayRegionArbitrage:
         del self.shares[ticker]
         del self.base_shares[ticker]
 
-        self.trades.append(roi)
+        self.trades.append((type, roi))
         self._cpt.remove(idx)
 
     def is_closing(self, timestamp: time) -> bool:
