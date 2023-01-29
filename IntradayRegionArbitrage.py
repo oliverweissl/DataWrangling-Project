@@ -117,8 +117,9 @@ class IntradayRegionArbitrage:
                 break
 
             # trigger stop-loss
-            pnl = self.shares[self.tickers[i]] * self._price_data[i] + self.base_shares[self.tickers[i]] * self._price_data[0]
-            if pnl < (self.trade_size / len(self.tickers) * self.sl_percent * -1):
+            ticker: str = self.tickers[i]
+            pnl = (self.balance + (self.base_shares[ticker] * self._base_share_price * -1) + (self.shares[ticker] * self._price_data[i] * -1))/self.balance - 1
+            if pnl < (self.sl_percent * -1):
                 print("\tstop loss")
                 self.close_trade(i)
 
